@@ -77,11 +77,13 @@ img {
 <div id="raw-data-and-cleaning" class="section level1">
 <h1>Raw Data and Cleaning</h1>
 <p>The data as supplied corresponds to measurements of acceleration, gyroscopic motion and magnetometer data recorded by Razor inertial measurement units. The units were strapped to the dumbbell, glove, armband and belt of participants performing a dumbbell exercise. There were six participants in total and the data were recorded as the participants performed ten repetitions of a dumbbell exercise. The exercise was repeated five times for each participant and they performed variations on the exercise which were given as give different classes;</p>
-<pre><code>* A - correct performance of the exercise;
-* B - throwing elbows to the front;
-* C - lifting only halfway;
-* D - lowering only halfway; and
-* E - throwing hips to the front.</code></pre>
+<ul>
+<li>A - correct performance of the exercise;</li>
+<li>B - throwing elbows to the front;</li>
+<li>C - lifting only halfway;</li>
+<li>D - lowering only halfway; and</li>
+<li>E - throwing hips to the front.</li>
+</ul>
 <p>Each type of measurement (acceleration, gyroscopic motion and magnetometer data) is given on three axis, and four additional features are calculated - the Euler angles of yaw, pitch and roll, and a total acceleration. Thus we have 52 measurements for every sample, which incidentally is given at a rate of 45Hz as the exercises were performed.</p>
 <p>The original paper used a more sophisticated feature extraction process to perform their classification; we do not utilise their approach here as the testing data only specifies the 52 measurements described above per sample (along with timestamp data etc).</p>
 <p>Using ‘like data’ to predict ‘like’ is the rule of thumb, as discussed in this course, the timestamp and participant name data is discarded from the analysis.</p>

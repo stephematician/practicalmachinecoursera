@@ -36,7 +36,8 @@ knitr::opts_chunk$set(warning=FALSE,
                       message=FALSE,
                       fig.path='figures/',
                       fig.width=4.5,
-                      fig.height=3)
+                      fig.height=3,
+                      fig.align='center')
 ```
 
 ```{r helpers, echo=FALSE}
@@ -109,11 +110,11 @@ repetitions of a dumbbell exercise. The exercise was repeated five times for
 each participant and they performed variations on the exercise which were
 given as give different classes;
 
-    # A - correct performance of the exercise;
-    # B - throwing elbows to the front;
-    # C - lifting only halfway;
-    # D - lowering only halfway; and
-    # E - throwing hips to the front.
+  * A - correct performance of the exercise;
+  * B - throwing elbows to the front;
+  * C - lifting only halfway;
+  * D - lowering only halfway; and
+  * E - throwing hips to the front.
 
 Each type of measurement (acceleration, gyroscopic motion and magnetometer data)
 is given on three axis, and four additional features are calculated - the
@@ -185,7 +186,7 @@ row number
 
 The cleaned box-plot is shown below:
 
-```{r, echo=FALSE}
+```{r cleaned_plot, echo=FALSE}
 print(ggplot(data=clean_df,
              aes(y=gyros_dumbbell_x,
                  x=classe)) +
@@ -265,18 +266,24 @@ a training set accuracy of
 `r paste0(format(HAR_rf$results$Accuracy[HAR_rf$results$mtry == 
                                          HAR_rf$bestTune[,]] * 100),
           '%')`.
-The confusion matrix for the testing set (from out partitioning, not the final
-twenty test cases) is:
+The confusion matrix for the testing set (from our partitioning procedure, not
+to be confused with the twenty test cases for the quiz) is:
 
 ```{r, echo=FALSE}
 
 predict_test_rf <- predict(HAR_rf,
                            newdata=pca_testing_df)
 kable(confusionMatrix(predict_test_rf, testing_df$classe)$table)
+```
+
+We can also plot the confusion matrix to give a visual representation of the 
+misclassification.
+
+```{r confusion_plot, echo=FALSE}
 print(ggplot(data=data.frame(predicted=predict_test_rf,
                              observed=testing_df$classe),
              aes(x=predicted, y=observed)) +
-    geom_jitter(width=0.75, height=0.75, size=0.5) +
+    geom_jitter(width=0.75, height=0.75, size=0.35) +
     theme_bw()
 )
 ```
@@ -284,7 +291,9 @@ print(ggplot(data=data.frame(predicted=predict_test_rf,
 The confusion matrix indicates strong performance of the model across all
 classes, with only `r format(sum(!(predict_test_rf == testing_df$classe)))`
 misclassified observations in the testing set which has a total of
-`r format(nrow(testing_df))` observations.
+`r format(nrow(testing_df))` observations. Prediction of class D appears
+to be weakest, which is lowering the dumbbell halfway, this being confused
+with raising the dumbbell halfway.
 
 The out-of-sample accuracy can be measured by the rate of correct classification
 performed by the trained model on the testing set, which is
@@ -297,7 +306,10 @@ The data was cleaned by removing the aggregated feature variables and the
 unrelated timestamp data. A random forest model combined with PCA was built on
 a subset of this data, trained using k-fold cross-validation. The out-of-sample
 accuracy was estimated on a testing set as 
-`r pretty_accuracy(predict_test_rf, testing_df$classe)`. 
+`r pretty_accuracy(predict_test_rf, testing_df$classe)`. Whilst the confusion
+rate was generally good, the weakest performance was correctly identifying
+lowering the dumbbell half-way, which was occasionally confused with raising
+it halfway.
 
 # Appendix
 
