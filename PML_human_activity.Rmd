@@ -1,0 +1,331 @@
+---
+title: 'Human Activity Recognition'
+subtitle: 'Practical Machine Learning Coursera - John Hopkins University'
+author: 'Stephen Wade'
+date: '`r format(Sys.Date(), format="%B %d, %Y")`'
+output:
+  html_document: default
+references:
+- id: Velloso2013
+  title: Qualitative Activity Recognition of Weight Lifting Exercises
+  author:
+  - family: Velloso
+    given: Eduardo
+  - family: Bulling
+    given: Andreas
+  - family: Gellersen
+    given: Hans
+  - family: Ugulino
+    given: Wallace
+  - family: Fuks
+    given: Hugo
+  container-title: Proceedings of the 4th Augmented Human International Conference
+  publisher: ACM
+  page: 116--123
+  type: article-journal
+  issued:
+    year: 2013
+---
+
+---
+
+```{r knitr_setup, echo=FALSE}
+library(knitr)
+
+knitr::opts_chunk$set(warning=FALSE,
+                      message=FALSE,
+                      fig.path='figures/',
+                      fig.width=4.5,
+                      fig.height=3)
+```
+
+```{r helpers, echo=FALSE}
+pretty_accuracy = function(x, y) {
+  paste0(format(sum(as.numeric(x==y)) / length(x)*100), 
+         '%')
+}
+```
+
+```{r constants, echo=FALSE}
+project_pca_threshold = 0.90
+```
+
+```{r data_download, echo=FALSE, cache=TRUE}
+
+
+if (!file.exists('data')) {
+    dir.create('data')
+}
+
+training_data_url <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+training_local_file <- file.path('data', basename(training_data_url))
+testing_data_url <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+testing_local_file <- file.path('data', basename(testing_data_url))
+
+if (!file.exists(training_local_file)) {
+    download.file(training_data_url,
+                  training_local_file,
+                  method='curl')
+}
+if (!file.exists(testing_local_file)) {
+    download.file(testing_data_url,
+                  testing_local_file,
+                  method='curl')
+}
+```
+
+```{r parallel_setup, echo=FALSE}
+library(doParallel)
+library(foreach)
+
+n_cores <- detectCores()
+project_cluster <- makeCluster(max(c(n_cores-2,1)))
+registerDoParallel(project_cluster)
+```
+
+# Summary
+
+This assignment is to predict the correct or incorrect technique used in a
+dumbbell exercise using the data supplied by a inertia measurement unit, 
+such as a Jawbone Up, Nike FuelBand, or Fitbit. The dataset is drawn from
+the study by [@Velloso2013] who performed a more sophisticated feature 
+extraction based on windowing of the time-series which we are not able to apply
+here - as the final quiz only allows for a single observation in time and
+not a series. The final model chosen is a random forest model, whose
+number of randomly selected partitioning variables is trained via
+k-fold cross validation on a subset of the data assigned as training data. The
+remaining data is assigned as testing data which is used to approximate
+the out-of-sample error rate. The final out-of-sample error rate is 
+roughly 97%.
+
+# Raw Data and Cleaning
+
+The data as supplied corresponds to measurements of acceleration, gyroscopic
+motion and magnetometer data recorded by Razor inertial measurement units.
+The units were strapped to the dumbbell, glove, armband and belt of 
+participants performing a dumbbell exercise. There were six participants in 
+total and the data were recorded as the participants performed ten
+repetitions of a dumbbell exercise. The exercise was repeated five times for
+each participant and they performed variations on the exercise which were
+given as give different classes;
+
+    # A - correct performance of the exercise;
+    # B - throwing elbows to the front;
+    # C - lifting only halfway;
+    # D - lowering only halfway; and
+    # E - throwing hips to the front.
+
+Each type of measurement (acceleration, gyroscopic motion and magnetometer data)
+is given on three axis, and four additional features are calculated - the
+Euler angles of yaw, pitch and roll, and a total acceleration. Thus we have
+52 measurements for every sample, which incidentally is given at a rate of
+45Hz as the exercises were performed.
+
+The original paper used a more sophisticated feature extraction process to
+perform their classification; we do not utilise their approach here as the
+testing data only specifies the 52 measurements described above per sample
+(along with timestamp data etc).
+
+Using 'like data' to predict 'like' is the rule of thumb, as discussed in this
+course, the timestamp and participant name data is discarded from the analysis.
+
+```{r "data_cleaning", echo=FALSE}
+raw_df <- read.csv(training_local_file)
+
+library(dplyr)
+
+dispose <- grepl('var|avg|stddev|max|min|kurtosis|skewness|amplitude',
+                 names(raw_df))
+clean_meas_df <- raw_df[,!dispose]
+
+dispose <- grepl('timestamp|name|window',
+                 names(clean_meas_df))
+clean_df <- clean_meas_df[,!dispose]
+clean_df <- select(clean_df, -X)
+
+rm(list=c('raw_df',
+          'clean_meas_df'))
+
+```
+
+Including the final recorded variable (the class, which we are trying to predict)
+there are `r format(ncol(clean_df))` columns in the dataset. The clean
+data is stored in a data frame called `clean_df`.
+
+The clean data contains
+`r format(sum(sapply(clean_df,
+              function(x) {
+                   sum(is.na(x))
+              })
+))`
+missing entries.
+
+
+The gyroscopic readings on the dumbbell and forearm contain an outlier,
+shown below for the dumbbell via a box plot:
+
+```{r outlier_detection, echo=FALSE}
+library(outliers)
+library(ggplot2)
+print(ggplot(data=clean_df,
+             aes(y=gyros_dumbbell_x,
+                 x=classe)) +
+    geom_boxplot() +
+    theme_bw() +
+    xlab('Class') +
+    ylab('Dumbell gyroscopic-x')
+)
+outlier_ind <- outlier(clean_df$gyros_dumbbell_x, logical=TRUE)
+clean_df <- clean_df[!outlier_ind,]
+```
+
+These were found to be the result of the outlying data point, given by
+row number
+`r format(which(outlier_ind))`.
+
+The cleaned box-plot is shown below:
+
+```{r, echo=FALSE}
+print(ggplot(data=clean_df,
+             aes(y=gyros_dumbbell_x,
+                 x=classe)) +
+    geom_boxplot() +
+    theme_bw() +
+    xlab('Class') +
+    ylab('Dumbell gyroscopic-x')
+)
+```
+
+
+# Model Training
+
+We split the cleaned data frame into a training and testing set for the
+building of the model. Although we have a large amount of data, in fact we have
+`r format(nrow(clean_df))` observations, we only split the data into a 
+training and test set (validation set is considered in the training of
+the model parameters).
+
+```{r data_partition, echo=FALSE}
+library(caret)
+set.seed(5844)
+train_ind <- createDataPartition(clean_df$classe,
+                                 p=0.7,
+                                 list=FALSE)
+training_df <- clean_df[train_ind,]
+testing_df <- clean_df[-train_ind,]
+```
+
+As there are a large number of predictors (`r format(ncol(clean_df)-1)`),
+principal component analysis (PCA) is used to pre-process the data to reduce the
+number of covariates while still explaining a large portion of the variance in
+the predictors. There is a small risk that this will reduce the impact of
+certain predictive variables however this risk is ignored here.
+
+```{r model_training, echo=FALSE, cache=TRUE}
+classe_ind <- names(training_df) == 'classe'
+pca_f <- preProcess(x=training_df[,!classe_ind],
+                    method='pca',
+                    thresh=project_pca_threshold)
+pca_training_df <- predict(pca_f,
+                           newdata=training_df[,!classe_ind])
+pca_testing_df <- predict(pca_f,
+                          newdata=testing_df[,!classe_ind])
+set.seed(7788)
+HAR_rf <- train(x=pca_training_df,
+                y=training_df$classe,
+                method='rf',
+                trControl=trainControl(method='cv',
+                                       number=8,
+                                       repeats=1),
+                tuneGrid=expand.grid(mtry=c(2,3,4,8,20)),
+                allowParallel=TRUE,
+                foreach=TRUE)
+```
+
+We used the first `r format(pca_f$numComp)` principal components which explain
+at least `r paste0(format(project_pca_threshold*100), '%')` of the variance of
+the predictor variables, this a healthy reduction in number from the original
+`r format(ncol(clean_df)-1)` predictors.
+
+A random forest model was chosen as this allowed for non-linear relationships
+and a high degree of accuracy. These models have a risk of over-fitting and
+lack of interpretability, however the goal here was to classify data from the
+original study and thus these risk are likely negligible.
+
+k-fold cross-validation was performed via carets `train()` function with `k=8`.
+This value reduces the variance slightly from the default, and may increase the
+bias in the accuracy estimates slightly. The error estimated by cross-validation
+is used to train the `mtry` parameter, which is the number of variables randomly
+sampled as candidates at each split.
+
+# Results
+
+The trained value for `mtry` is `r format(HAR_rf$bestTune[,])`, which has
+a training set accuracy of 
+`r paste0(format(HAR_rf$results$Accuracy[HAR_rf$results$mtry == 
+                                         HAR_rf$bestTune[,]] * 100),
+          '%')`.
+The confusion matrix for the testing set (from out partitioning, not the final
+twenty test cases) is:
+
+```{r, echo=FALSE}
+
+predict_test_rf <- predict(HAR_rf,
+                           newdata=pca_testing_df)
+kable(confusionMatrix(predict_test_rf, testing_df$classe)$table)
+print(ggplot(data=data.frame(predicted=predict_test_rf,
+                             observed=testing_df$classe),
+             aes(x=predicted, y=observed)) +
+    geom_jitter(width=0.75, height=0.75, size=0.5) +
+    theme_bw()
+)
+```
+
+The confusion matrix indicates strong performance of the model across all
+classes, with only `r format(sum(!(predict_test_rf == testing_df$classe)))`
+misclassified observations in the testing set which has a total of
+`r format(nrow(testing_df))` observations.
+
+The out-of-sample accuracy can be measured by the rate of correct classification
+performed by the trained model on the testing set, which is
+`r pretty_accuracy(predict_test_rf, testing_df$classe)`.
+
+
+# Conclusions
+
+The data was cleaned by removing the aggregated feature variables and the
+unrelated timestamp data. A random forest model combined with PCA was built on
+a subset of this data, trained using k-fold cross-validation. The out-of-sample
+accuracy was estimated on a testing set as 
+`r pretty_accuracy(predict_test_rf, testing_df$classe)`. 
+
+# Appendix
+
+These are the key fragments of code for running this analysis.
+
+Downloading the data:
+```{r ref.label="data_download", eval=FALSE}
+```
+
+Parallel processor setup:
+```{r ref.label="parallel_setup", eval=FALSE}
+```
+
+Cleaning the data:
+```{r ref.label="data_partition", eval=FALSE}
+```
+
+Detection of an outlier:
+```{r ref.label="outlier_detection", eval=FALSE}
+```
+
+Partitioning the clean data:
+```{r ref.label="data_partition", eval=FALSE}
+```
+
+Training the model:
+```{r ref.label="model_training", eval=FALSE}
+```
+
+# References
+
